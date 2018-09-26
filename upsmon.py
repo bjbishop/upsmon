@@ -11,15 +11,26 @@ encoding = locale.getdefaultlocale()[1]
 tmpfilename = "/tmp/upsmon.txt"
 p = pathlib.Path(tmpfilename)
 
+try:
+    tty = os.environ['UPSMON_TTY']
+except KeyError:
+    tty = "ttyACM0"
+
+try:
+    baud = int(os.environ['UPSMON_BAUD'])
+except KeyError:
+    baud = 9600
+
 def shutdown():
     if not p.exists():
-    	try:
-       	    open(tmpfilename, "a").close()
-    	except IOError:
-       	    print("File error reading", tmpfilename)
-        
-    	print("SHUTTING DOWN IN 1 MINUTE")
-    	call("/bin/bash -c \"/usr/bin/nohup /sbin/shutdown -h -P +1 &\"", shell=True)
+        try:
+            open(tmpfilename, "a").close()
+        except IOError:
+            print("File error reading", tmpfilename)
+
+        print("SHUTTING DOWN IN 1 MINUTE")
+        call("/bin/bash -c \"/usr/bin/nohup /sbin/shutdown -h -P +1 &\"", shell=True)
+
 
 def cancel_shutdown():
     if p.exists():
@@ -27,8 +38,8 @@ def cancel_shutdown():
         call(["/sbin/shutdown", "-c", "||", "true"])
         os.remove(tmpfilename)
 
-battery = False
-s = serial.Serial('/dev/ttyACM0', 9600)
+
+s = serial.Serial(f"/dev/{tty}", baud)
 
 print("starting up, sleeping")
 sleep(2)
@@ -36,5 +47,7 @@ sleep(2)
 while True:
     line = s.readline().decode(encoding)
     parsed = int(line.split("\r", 2)[0].strip())
-    if ( int(parsed) <= 9 ) : cancel_shutdown()
-    if ( int(parsed) >= 10 ) : shutdown()
+    if (int(parsed) <= 9):
+        cancel_shutdown()
+    if (int(parsed) >= 10):
+        shutdown()
