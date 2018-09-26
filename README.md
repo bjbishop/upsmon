@@ -24,6 +24,16 @@ The processing code uploaded to the arduino.  I'm using an UNO
 A python script to monitor of incoming signals from the Arduino
 
 
+Environment Variables
+---------------------
+
+* UPSMON\_TTY
+  The device ID in /dev to use.  UPSMON\_TTY=BLAH will be /dev/BLAH.  Defaults to ttyACM0
+  
+* UPSMON\_BAUD
+  Baud rate for the serial port.  Defaults to 9600
+
+
 Image
 -----
 
