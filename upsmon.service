@@ -1,0 +1,8 @@
+[Unit]
+Description = UPSmon monitoring script
+
+[Service]
+ExecStart = /usr/bin/python3 /home/bishbr/upsmon/upsmon.py
+
+[Install]
+WantedBy = multi-user.target
