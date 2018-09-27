@@ -2,7 +2,7 @@
 Description = UPSmon monitoring script
 
 [Service]
-Environment="UPSMON_TTY=ttyACM0 UPSMON_BAUD=9600"
+Environment=UPSMON_TTY=ttyACM0 UPSMON_BAUD=9600
 ExecStart = /usr/bin/python3 /opt/upsmon/upsmon.py
 Restart=always
 RestartSec=5
