@@ -2,7 +2,7 @@
 Description = UPSmon monitoring script
 
 [Service]
-ExecStart = /usr/bin/python3 /home/bishbr/upsmon/upsmon.py
+ExecStart = /usr/bin/python3 /opt/upsmon/upsmon.py
 
 [Install]
 WantedBy = multi-user.target
