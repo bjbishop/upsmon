@@ -21,6 +21,7 @@ try:
 except KeyError:
     baud = 9600
 
+
 def shutdown():
     if not p.exists():
         try:
@@ -47,7 +48,7 @@ sleep(2)
 while True:
     line = s.readline().decode(encoding)
     parsed = int(line.split("\r", 2)[0].strip())
-    if (int(parsed) <= 9):
+    if (int(parsed) <= 4):
         cancel_shutdown()
-    if (int(parsed) >= 10):
+    if (int(parsed) >= 5):
         shutdown()
