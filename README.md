@@ -40,6 +40,3 @@ Image
 Here's a picture of my first attempt, pretty hacked together
 
 [Arduino UPS monitor](https://flic.kr/p/BT4Y35)
-
-
-
