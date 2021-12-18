@@ -1,0 +1,7 @@
+#!/bin/sh -e
+exec 2>&1
+
+. venv/bin/activate
+
+exec chpst -P -v -L upsmon_sv.lock python ./upsmon.py
+

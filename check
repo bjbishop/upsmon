@@ -1,0 +1,7 @@
+#!/bin/sh
+
+set -e
+
+if ! [ -c /dev/ttyU0 ]; then
+  exit 1
+fi

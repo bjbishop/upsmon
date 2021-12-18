@@ -14,7 +14,7 @@ p = pathlib.Path(tmpfilename)
 try:
     tty = os.environ['UPSMON_TTY']
 except KeyError:
-    tty = "ttyACM0"
+    tty = "ttyU0"
 
 try:
     baud = int(os.environ['UPSMON_BAUD'])
@@ -30,13 +30,13 @@ def shutdown():
             print("File error reading", tmpfilename)
 
         print("SHUTTING DOWN IN 1 MINUTE")
-        call("/bin/bash -c \"/usr/bin/nohup /sbin/shutdown -h -P +1 &\"", shell=True)
+        call("/bin/sh -c \"/usr/bin/nohup /sbin/shutdown -p +5 &\"", shell=True)
 
 
 def cancel_shutdown():
     if p.exists():
         print("TMP FILE ", tmpfilename, " EXISTS, CANCEL THE SHUTDOWN")
-        call(["/sbin/shutdown", "-c", "||", "true"])
+        call(["/bin/pkill", "shutdown"])
         os.remove(tmpfilename)
 
 
@@ -44,6 +44,7 @@ s = serial.Serial(f"/dev/{tty}", baud)
 
 print("starting up, sleeping")
 sleep(2)
+
 
 while True:
     line = s.readline().decode(encoding)
