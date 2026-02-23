@@ -1,0 +1,14 @@
+[Unit]
+Description=UPS monitor
+AssertPathExists=/dev/ttyACM0
+
+[Service]
+Type=exec
+Environment="UPSMON_TTY=ttyACM0 UPSMON_BAUD=9600"
+ExecStartPre=/bin/sleep 10
+ExecStart=/opt/upsmon/.venv/bin/python upsmon.py
+WorkingDirectory=/opt/upsmon
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

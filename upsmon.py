@@ -1,20 +1,19 @@
 #!/usr/bin/env python
 
 from subprocess import call
-from time import sleep
 import serial
 import locale
 import pathlib
 import os
 
-encoding = locale.getdefaultlocale()[1]
+encoding = locale.getlocale()[0] # en_US
 tmpfilename = "/tmp/upsmon.txt"
 p = pathlib.Path(tmpfilename)
 
 try:
     tty = os.environ['UPSMON_TTY']
 except KeyError:
-    tty = "ttyU0"
+    tty = "ttyACM0"
 
 try:
     baud = int(os.environ['UPSMON_BAUD'])
@@ -30,21 +29,15 @@ def shutdown():
             print("File error reading", tmpfilename)
 
         print("SHUTTING DOWN IN 1 MINUTE")
-        call("/bin/sh -c \"/usr/bin/nohup /sbin/shutdown -p +5 &\"", shell=True)
-
+        call(["/usr/bin/systemctl", "poweroff", "--when=+1minute"])
 
 def cancel_shutdown():
     if p.exists():
         print("TMP FILE ", tmpfilename, " EXISTS, CANCEL THE SHUTDOWN")
-        call(["/bin/pkill", "shutdown"])
+        call(["systemctl", "poweroff", "--when=cancel"])
         os.remove(tmpfilename)
 
-
 s = serial.Serial(f"/dev/{tty}", baud)
-
-print("starting up, sleeping")
-sleep(2)
-
 
 while True:
     line = s.readline().decode(encoding)
