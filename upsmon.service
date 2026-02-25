@@ -1,14 +1,113 @@
+# ============================================================
+# UPS Monitor Service
+# Reads power status from a USB serial device (ttyACM0) and
+# initiates a graceful shutdown when UPS battery is low.
+# ============================================================
+
 [Unit]
 Description=UPS monitor
+
+# Wait for the serial device to be ready before starting
+After=dev-ttyACM0.device
+
+# Tie this service's lifecycle to the device — if the device
+# disappears (cable unplugged, USB reset), the service stops
+# automatically and restarts when the device comes back
+BindsTo=dev-ttyACM0.device
+
+# Extra safety check: don't even attempt to start if the
+# device file doesn't exist
 AssertPathExists=/dev/ttyACM0
 
+# Rate-limit restarts: allow at most 5 restart attempts within
+# 5 minutes. After that, systemd stops trying (use
+# "systemctl reset-failed upsmon" to clear the counter)
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
+# "exec" means systemd considers the service started once the
+# binary has been successfully exec'd (not just forked)
 Type=exec
-Environment="UPSMON_TTY=ttyACM0 UPSMON_BAUD=9600"
+
+# Pass the serial device name and baud rate as environment
+# variables so the Python script knows which port to open
+Environment="UPSMON_TTY=ttyACM0"
+Environment="UPSMON_BAUD=9600"
+
+# Give the USB serial device a moment to fully initialise
 ExecStartPre=/bin/sleep 10
+
+# Remove any leftover dry-run marker file from testing so the
+# service always starts in production (live) mode.
+# Two safeguards prevent a missing file from blocking startup:
+#   1. "rm -f" exits 0 even when the file does not exist
+#   2. The "-" prefix tells systemd to continue even if rm fails
+# Either one alone is sufficient; both are used for extra safety.
+ExecStartPre=-/bin/rm -f /opt/upsmon/.dryrun
+
+# Run the monitoring script using the project's virtual env
+# Python — this ensures pyserial and other deps are available
+# without needing to "activate" the venv
 ExecStart=/opt/upsmon/.venv/bin/python upsmon.py
+
+# The script and venv live here; relative paths in ExecStart
+# resolve from this directory
 WorkingDirectory=/opt/upsmon
+
+# Restart on any failure (non-zero exit, signal, timeout, etc.)
+# "always" is more aggressive than "on-failure" — it also
+# restarts if the process exits cleanly (exit code 0), which
+# guards against the read loop ending unexpectedly
+Restart=always
+
+# Wait 10 seconds between restart attempts to avoid hammering
+# the serial port
+RestartSec=10
+
+# If the script hangs and stops producing output, kill it after
+# 90 seconds so the restart logic can kick in
+WatchdogSec=90
+
+# Give the script up to 30 seconds to start; if it hasn't
+# signalled readiness by then, consider it failed
+TimeoutStartSec=30
+
+# Allow up to 60 seconds for a graceful stop (important because
+# the script may have scheduled a delayed poweroff)
+TimeoutStopSec=60
+
+# Send SIGTERM first; if the process doesn't exit within
+# TimeoutStopSec, systemd sends SIGKILL
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Create /run/upsmon/ automatically when the service starts and
+# remove it when the service stops.  Used for the shutdown flag
+# file (/run/upsmon/flag) which must be visible to both this
+# service and the external checker script (not affected by
+# PrivateTmp isolation).
+RuntimeDirectory=upsmon
+
+# Use /tmp isolation so the service's temp files don't collide
+# with other processes
 PrivateTmp=yes
 
+# Security hardening — since this service only needs to read a
+# serial port and call systemctl, lock down what it can do
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+
+# Log stdout/stderr to the systemd journal so you can review
+# output with: journalctl -u upsmon -f
+StandardOutput=journal
+StandardError=journal
+
+# Tag journal entries so they're easy to filter
+SyslogIdentifier=upsmon
+
 [Install]
+# Start this service as part of the normal multi-user boot
+# Enable with: systemctl enable upsmon
 WantedBy=multi-user.target

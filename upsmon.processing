@@ -1,13 +1,31 @@
-const int SENSOR = 0;
+// ---------------------------------------------------------------
+// Arduino sketch for UPS battery-light sensor.
+//
+// A photoresistor on analog pin A0 reads ambient light from the
+// UPS battery indicator LED.  The raw ADC value (0–1023) is sent
+// over serial every 5 seconds where upsmon.py consumes it.
+//
+// Typical readings observed with this hardware:
+//   - Battery light OFF (mains power OK):  0–2
+//   - Battery light ON  (on battery):      10+
+//
+// The Python side uses a sliding-window average with hysteresis:
+//   avg >= 10  →  schedule shutdown   (THRESHOLD_SHUTDOWN)
+//   avg <=  2  →  cancel shutdown     (THRESHOLD_CANCEL)
+//
+// If you change the baud rate here, also update UPSMON_BAUD in
+// upsmon.py / upsmon.service.
+// ---------------------------------------------------------------
 
+const int SENSOR = 0;    // Analog pin A0
 int val = 0;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(9600);    // Must match UPSMON_BAUD (default 9600)
 }
 
 void loop() {
-  val = analogRead(SENSOR);
-  Serial.println(val);
-  delay(5000);
+  val = analogRead(SENSOR);  // Read analog value (0–1023)
+  Serial.println(val);       // Send value over serial to upsmon.py
+  delay(5000);               // Wait 5 s — Python reads each line as it arrives
 }
