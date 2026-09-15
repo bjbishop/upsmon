@@ -85,8 +85,7 @@ def nut_state(on_battery: bool) -> dict:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    signal.signal(signum=signal.SIGTERM, handler=lambda _s, _f: sys.exit(0))
-
+    signal.signal(signal.SIGTERM, lambda _s, _f: sys.exit(0))
     try:
         ser = serial.Serial(f"/dev/{TTY}", BAUD)
     except serial.SerialException as exc:
