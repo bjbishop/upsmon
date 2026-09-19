@@ -65,7 +65,15 @@ log = logging.getLogger("nut-bridge")
 
 SEQ_FILE = pathlib.Path("/opt/upsmon/myups.seq")
 
+
 def write_seq(on_battery: bool) -> None:
+    # Apply any test override
+    if OVERRIDE_FILE.exists():
+        override = OVERRIDE_FILE.read_text().strip().upper()
+        if override in ("OB", "OL"):
+            log.info("Test override active: forcing %s", override)
+            on_battery = (override == "OB")
+
     status      = "OB" if on_battery else "OL"
     batt_charge = "75" if on_battery else "100"
     content = f"""device.mfr: Homebrew
@@ -77,24 +85,7 @@ battery.charge: {batt_charge}
 """
     SEQ_FILE.write_text(content)
     log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
-    
 
-def nut_state(on_battery: bool) -> dict:
-    """Return the full variable dict for the current power state."""
-    # Allow manual override for testing without physical power loss
-    if OVERRIDE_FILE.exists():
-        override = OVERRIDE_FILE.read_text().strip().upper()
-        if override in ("OB", "OL"):
-            log.info("Test override active: forcing %s", override)
-            on_battery = (override == "OB")
-
-    status      = "OB" if on_battery else "OL"
-    batt_charge = "75" if on_battery else "100"
-    return {
-        **NUT_STATIC,
-        "ups.status":     status,
-        "battery.charge": batt_charge,
-    }
 
 # ---------------------------------------------------------------------------
 # Main loop
