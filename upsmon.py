@@ -65,7 +65,6 @@ log = logging.getLogger("nut-bridge")
 
 SEQ_FILE = pathlib.Path("/opt/upsmon/myups.seq")
 
-
 def write_seq(on_battery: bool) -> None:
     status = "OB" if on_battery else "OL"
     batt_charge = "75" if on_battery else "100"
@@ -77,6 +76,16 @@ def write_seq(on_battery: bool) -> None:
             status = override
             batt_charge = "10" if override == "OB LB" else "75" if override == "OB" else "100"
 
+    content = f"""device.mfr: Homebrew
+device.model: ArduinoUPS
+battery.voltage.nominal: 12.0
+ups.load: 50
+ups.status: {status}
+battery.charge: {batt_charge}
+"""
+    SEQ_FILE.write_text(content)
+    log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
+    
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
