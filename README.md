@@ -6,8 +6,6 @@ Since I couldn't figure out the data cable for my UPS, I decided to use an Ardui
 
 ## How it works
 
-## How it works
-
 The Arduino reads an analog light sensor (aimed at the UPS battery indicator LED) every few seconds
 and sends the value over serial. A Python script on the Pi reads these values, applies a rolling
 average, and writes a NUT state file. NUT's `dummy-ups` driver reads that file and serves it to
