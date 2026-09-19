@@ -41,7 +41,7 @@ WINDOW_SIZE        = 3
 REPUBLISH_INTERVAL = 30   # seconds
 
 # Use test file for simulation
-OVERRIDE_FILE = pathlib.Path("/run/upsmon/test-state")
+OVERRIDE_FILE = pathlib.Path("/opt/upsmon/test-state")
 
 # Static NUT variables we always advertise.
 # dummy-ups requires at least ups.status; the rest keep upsmon happy.
