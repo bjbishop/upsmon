@@ -40,6 +40,9 @@ WINDOW_SIZE        = 3
 # dummy-ups will mark the UPS stale if it stops hearing from us.
 REPUBLISH_INTERVAL = 30   # seconds
 
+# Use test file for simulation
+OVERRIDE_FILE = pathlib.Path("/run/upsmon/test-state")
+
 # Static NUT variables we always advertise.
 # dummy-ups requires at least ups.status; the rest keep upsmon happy.
 NUT_STATIC = {
@@ -69,15 +72,21 @@ def emit(variables: dict) -> None:
     for key, value in variables.items():
         print(f"{key}: {value}", flush=True)
 
-
 def nut_state(on_battery: bool) -> dict:
     """Return the full variable dict for the current power state."""
+    # Allow manual override for testing without physical power loss
+    if OVERRIDE_FILE.exists():
+        override = OVERRIDE_FILE.read_text().strip().upper()
+        if override in ("OB", "OL"):
+            log.info("Test override active: forcing %s", override)
+            on_battery = (override == "OB")
+
     status      = "OB" if on_battery else "OL"
-    batt_charge = "75" if on_battery else "100"   # conservative dummy
+    batt_charge = "75" if on_battery else "100"
     return {
         **NUT_STATIC,
-        "ups.status":      status,
-        "battery.charge":  batt_charge,
+        "ups.status":     status,
+        "battery.charge": batt_charge,
     }
 
 # ---------------------------------------------------------------------------
