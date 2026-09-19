@@ -86,7 +86,7 @@ battery.charge: {batt_charge}
 """
     SEQ_FILE.write_text(content, encoding=ENCODING)
     log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
-    
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
