@@ -6,7 +6,6 @@ case "$1" in
         ;;
     online)
         logger -t upssched "Power restored — cancelling shutdown timer and cleaning up"
-        upssched -c cancel onbatt-shutdown
         rm -f /opt/upsmon/test-state
         ;;
 esac
