@@ -236,3 +236,5 @@ MONITOR myups@<pi-ip> 1 upsmon <password> secondary
 SHUTDOWNCMD "/sbin/shutdown -h +0"
 ```
 4. Open port 3493 on the Pi: `sudo ufw allow 3493/tcp`
+
+
