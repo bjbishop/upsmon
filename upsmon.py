@@ -20,7 +20,7 @@ import os
 import signal
 import sys
 import time
-
+import pathlib
 import serial
 
 # ---------------------------------------------------------------------------
