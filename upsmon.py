@@ -115,7 +115,7 @@ def main() -> None:
     last_emit:  float                  = 0.0
 
     # Emit an initial state immediately so dummy-ups isn't starved at startup
-    write_seq(nut_state(on_battery))
+    write_seq(on_battery)
     last_emit = time.monotonic()
 
     while True:
@@ -144,18 +144,18 @@ def main() -> None:
         if avg <= THRESHOLD_CANCEL and on_battery:
             on_battery = False
             log.info("Mains restored — emitting OL to NUT")
-            write_seq(nut_state(on_battery))
+            write_seq(on_battery)
             last_emit = time.monotonic()
 
         elif avg >= THRESHOLD_SHUTDOWN and not on_battery:
             on_battery = True
             log.warning("Power loss detected — emitting OB to NUT")
-            write_seq(nut_state(on_battery))
+            write_seq(on_battery)
             last_emit = time.monotonic()
 
         # --- Periodic republish so dummy-ups doesn't go stale ---------------
         elif time.monotonic() - last_emit >= REPUBLISH_INTERVAL:
-            write_seq(nut_state(on_battery))
+            write_seq(on_battery)
             last_emit = time.monotonic()
 
     ser.close()
