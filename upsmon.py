@@ -63,14 +63,21 @@ log = logging.getLogger("nut-bridge")
 # NUT output helpers
 # ---------------------------------------------------------------------------
 
-def emit(variables: dict) -> None:
-    """Write a block of NUT key=value lines to stdout and flush.
+SEQ_FILE = pathlib.Path("/opt/upsmon/myups.seq")
 
-    dummy-ups reads these line-by-line; flush=True is mandatory or
-    the driver will stall waiting for data.
-    """
-    for key, value in variables.items():
-        print(f"{key}: {value}", flush=True)
+def write_seq(on_battery: bool) -> None:
+    status      = "OB" if on_battery else "OL"
+    batt_charge = "75" if on_battery else "100"
+    content = f"""device.mfr: Homebrew
+device.model: ArduinoUPS
+battery.voltage.nominal: 12.0
+ups.load: 50
+ups.status: {status}
+battery.charge: {batt_charge}
+"""
+    SEQ_FILE.write_text(content)
+    log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
+    
 
 def nut_state(on_battery: bool) -> dict:
     """Return the full variable dict for the current power state."""
@@ -108,7 +115,7 @@ def main() -> None:
     last_emit:  float                  = 0.0
 
     # Emit an initial state immediately so dummy-ups isn't starved at startup
-    emit(nut_state(on_battery))
+    write_seq(nut_state(on_battery))
     last_emit = time.monotonic()
 
     while True:
@@ -137,18 +144,18 @@ def main() -> None:
         if avg <= THRESHOLD_CANCEL and on_battery:
             on_battery = False
             log.info("Mains restored — emitting OL to NUT")
-            emit(nut_state(on_battery))
+            write_seq(nut_state(on_battery))
             last_emit = time.monotonic()
 
         elif avg >= THRESHOLD_SHUTDOWN and not on_battery:
             on_battery = True
             log.warning("Power loss detected — emitting OB to NUT")
-            emit(nut_state(on_battery))
+            write_seq(nut_state(on_battery))
             last_emit = time.monotonic()
 
         # --- Periodic republish so dummy-ups doesn't go stale ---------------
         elif time.monotonic() - last_emit >= REPUBLISH_INTERVAL:
-            emit(nut_state(on_battery))
+            write_seq(nut_state(on_battery))
             last_emit = time.monotonic()
 
     ser.close()
