@@ -1,167 +1,194 @@
-UPSMON
-======
+# upsmon
 
-Since I couldn't figure out the data cable for my UPS, I decided to us my Arduino and a light sensor as a fun project to detect when on battery power.
+A Raspberry Pi-based UPS monitoring bridge that reads power state from an Arduino over serial and broadcasts it to the network via [Network UPS Tools (NUT)](https://networkupstools.org/).
 
+Since I couldn't figure out the data cable for my UPS, I decided to use an Arduino and a light sensor to detect when on battery power, and feed that into NUT so the whole network can react to power events.
 
-Goals
------
+## How it works
 
-When the battery is detected to be engaged, send the signal to shutdown the OS.
+The Arduino reads an analog light sensor (aimed at the UPS battery indicator LED) every few seconds and sends the value over serial. A Python script on the Pi reads these values, applies a rolling average, and writes a NUT state file. NUT's `dummy-ups` driver reads that file and serves it to `upsd`, which broadcasts power state to any NUT client on the network.
 
-If the power is reconnected, the battery light goes off sending the signal to cancel the running shutdown.
+```
+Arduino (analog light sensor → serial ADC values)
+        │
+        ▼
+upsmon.py (windowed average → writes myups.seq)
+        │
+        ▼
+dummy-ups driver (reads myups.seq in dummy-loop mode)
+        │
+        ▼
+upsd (serves on port 3493)
+        │
+        ▼
+nut-monitor (watches for OB/LB → triggers shutdown)
+        │
+        ▼
+NUT secondary clients (other machines on the network)
+```
 
+When 3 consecutive readings average >= 10 (battery light on), `upsmon.py` writes `OB` (on battery) to the NUT state file. When readings drop back to <= 2 (power restored), it writes `OL` (on line). NUT clients react to these state changes and shut down gracefully.
 
-Code
-----
+## Hardware
 
-* upsmon.processing
+- Raspberry Pi (any model with USB)
+- Arduino Uno running `upsmon.processing`, connected via USB (appears as `/dev/ttyACM0`)
+- Light sensor aimed at the UPS battery indicator LED
+- Arduino sends raw integer ADC values at 9600 baud, one per line
 
-The processing code uploaded to the arduino.  I'm using an UNO
+## Files
 
-* upsmon.py
+| File | Purpose |
+|---|---|
+| `upsmon.processing` | Arduino sketch (upload via Arduino IDE to an Uno) |
+| `upsmon.py` | Python bridge — reads serial, writes `myups.seq` |
+| `nut-bridge.sh` | Shell wrapper that activates the venv and runs `upsmon.py` |
+| `myups.seq` | NUT dummy-ups state file (auto-generated, do not edit manually) |
+| `requirements.txt` | Python dependencies (`pyserial`) |
 
-A python script to monitor of incoming signals from the Arduino
-
-
-Environment Variables
----------------------
+## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `UPSMON_TTY` | `ttyACM0` | Device name under `/dev/` |
 | `UPSMON_BAUD` | `9600` | Serial baud rate |
-| `UPSMON_DRYRUN` | `0` | Set to `1` to suppress real shutdown/cancel commands |
 
+## Installation
 
-Installation
-------------
+### 1. Python environment
 
 ```bash
-# Copy project to /opt/upsmon
 sudo cp -r . /opt/upsmon
 cd /opt/upsmon
-
-# Create venv and install deps
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
 
-# Install and enable the systemd service
-sudo cp upsmon.service /etc/systemd/system/
+### 2. NUT configuration
+
+**`/etc/nut/nut.conf`**
+```
+MODE=netserver
+```
+
+**`/etc/nut/ups.conf`**
+```ini
+[myups]
+    driver = dummy-ups
+    port = /opt/upsmon/myups.seq
+    mode = dummy-loop
+    desc = "Homebrew serial UPS"
+```
+
+**`/etc/nut/upsd.conf`**
+```
+LISTEN 0.0.0.0 3493
+```
+
+**`/etc/nut/upsd.users`**
+```ini
+[upsmon]
+    password = yourpassword
+    upsmon primary
+```
+
+**`/etc/nut/upsmon.conf`**
+```
+MONITOR myups@localhost 1 upsmon yourpassword primary
+SHUTDOWNCMD "/sbin/shutdown -h +0"
+HOSTSYNC 15
+DEADTIME 15
+FINALDELAY 180
+```
+
+### 3. Systemd service
+
+The `upsmon.py` script runs as its own service, independent of NUT:
+
+```bash
+sudo cp upsmon-bridge.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now upsmon
+sudo systemctl enable --now upsmon-bridge.service
 ```
 
 Upload `upsmon.processing` to the Arduino Uno via the Arduino IDE.
 
-
-Usage
------
-
-The service starts automatically on boot and watches `/dev/ttyACM0`.
+## Usage
 
 ```bash
-# View live logs
-journalctl -u upsmon -f
+# View live logs from the bridge script
+journalctl -fu upsmon-bridge.service
 
-# Stop / start / restart
-sudo systemctl stop upsmon
-sudo systemctl start upsmon
-sudo systemctl restart upsmon
+# View NUT monitor logs
+journalctl -fu nut-monitor
 
-# Check service health (used by cron / healthcheck)
-./upsmon_checker.sh
+# Check current UPS status
+upsc myups@localhost ups.status
+
+# Stop / start / restart the bridge
+sudo systemctl stop upsmon-bridge.service
+sudo systemctl start upsmon-bridge.service
+sudo systemctl restart upsmon-bridge.service
 ```
 
-**How it works:** The Arduino reads an analog light sensor every 5 seconds and sends the value over serial. When 3 consecutive readings average >= 10 (battery light on), `schedule_shutdown()` queues a 1-minute delayed poweroff. When readings drop back to <= 2 (power restored), `cancel_pending_shutdown()` cancels it.
+## UPS Status Values
 
-A flag file at `/run/upsmon/flag` prevents duplicate shutdown calls and is managed automatically by the service via `RuntimeDirectory=upsmon`.
+| Status | Meaning |
+|---|---|
+| `OL` | On line — mains power present |
+| `OB` | On battery — power loss detected |
+| `OB LB` | On battery, low battery — shutdown cascade triggered |
 
+## Testing
 
-Health Check (upsmon_checker.sh)
---------------------------------
-
-An external watchdog script that reports service status to [Healthchecks.io](https://healthchecks.io) via `hc-ping.com`. Run it from cron or a systemd timer to get alerts when the UPS monitor is unhealthy.
-
-It checks three things in order:
-1. Is `upsmon.service` active? If not → ping **fail** and exit.
-2. Does the serial port (`/dev/ttyACM0`) exist?
-3. Is the shutdown flag file (`/run/upsmon/flag`) present?
-
-| Port exists | Flag file exists | Result |
-|---|---|---|
-| yes | no | **OK** — normal operation |
-| yes | yes | **OK** — power returned, awaiting service cancel |
-| no | yes | **Fail** — shutdown already in progress |
-| no | no | **Fail** — port disappeared, waiting for service to react |
-
-All output is tagged `upsmon_checker` and sent to the systemd journal via `logger`.
-
-### Run manually
+Simulate a power outage without pulling the plug using a test override file:
 
 ```bash
-./upsmon_checker.sh
+# Simulate on battery
+echo "OB" | sudo tee /opt/upsmon/test-state
+
+# Simulate low battery (triggers FSD and shutdown cascade)
+echo "OB LB" | sudo tee /opt/upsmon/test-state
+
+# Restore to mains
+sudo rm /opt/upsmon/test-state
 ```
 
-### Cron
+The override file is checked on every write cycle (up to 30 seconds) and takes priority over real serial data.
+
+## FSD Recovery
+
+If power is restored before shutdown completes, NUT will show `FSD OL` and will not clear automatically. Restart the NUT stack to recover:
 
 ```bash
-# Add to root's crontab (sudo crontab -e)
-*/5 * * * * /opt/upsmon/upsmon_checker.sh
+sudo systemctl restart nut-driver@myups.service
+sudo systemctl restart nut-server
+sudo systemctl restart nut-monitor
 ```
 
-### Systemd timer
+## Adding NUT Clients
 
-Create two files:
+On each machine to be shut down by this Pi:
 
-**/etc/systemd/system/upsmon_checker.service**
-```ini
-[Unit]
-Description=UPS monitor health check
-
-[Service]
-Type=oneshot
-ExecStart=/opt/upsmon/upsmon_checker.sh
+1. Install `nut-client`
+2. Set `MODE=netclient` in `/etc/nut/nut.conf`
+3. Configure `/etc/nut/upsmon.conf`:
 ```
-
-**/etc/systemd/system/upsmon_checker.timer**
-```ini
-[Unit]
-Description=Run UPS monitor health check every 5 minutes
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
-
-[Install]
-WantedBy=timers.target
+MONITOR myups@<pi-ip> 1 upsmon <password> secondary
+SHUTDOWNCMD "/sbin/shutdown -h +0"
 ```
+4. Open port 3493 on the Pi: `sudo ufw allow 3493/tcp`
+
+## Health Check
+
+The original `upsmon_checker.sh` healthcheck script is no longer applicable in this NUT-based architecture. Use NUT's own status tools instead:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now upsmon_checker.timer
+# Quick status
+upsc myups@localhost
 
-# Verify
-systemctl list-timers upsmon_checker.timer
+# Full variable dump
+upsc myups@localhost
 ```
 
-The systemd timer approach is preferred over cron — it integrates with the journal, respects dependencies, and its status is visible via `systemctl`.
-
-
-Testing (dry-run mode)
-----------------------
-
-Dry-run mode logs what *would* happen without executing shutdown commands.
-
-```bash
-# Option A: env var
-UPSMON_DRYRUN=1 .venv/bin/python upsmon.py
-
-# Option B: marker file (can toggle at runtime without restart)
-sudo touch /opt/upsmon/.dryrun     # enable
-sudo rm -f /opt/upsmon/.dryrun     # disable
-```
-
-Note: the systemd unit's `ExecStartPre` removes `.dryrun` on every start so the service always runs live in production.
- 
+For external monitoring, consider polling `upsc myups@localhost ups.status` from a cron job or systemd timer and reporting to [Healthchecks.io](https://healthchecks.io).
