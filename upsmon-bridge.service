@@ -1,0 +1,14 @@
+[Unit]
+Description=Homebrew UPS serial monitor bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/upsmon
+ExecStart=/opt/upsmon/nut-bridge.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
