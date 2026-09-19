@@ -14,7 +14,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies with hash verification
-        run: pip install --require-hashes -r requirements.txt
+        run: pip install --require-hashes -r requirements-dev.txt
 
       - name: Run lint
         run: pylint *.py
