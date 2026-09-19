@@ -66,11 +66,12 @@ log = logging.getLogger("nut-bridge")
 SEQ_FILE = pathlib.Path("/opt/upsmon/myups.seq")
 
 def write_seq(on_battery: bool) -> None:
+    """Write the current UPS state to the dummy-ups sequence file."""
     status = "OB" if on_battery else "OL"
     batt_charge = "75" if on_battery else "100"
 
     if OVERRIDE_FILE.exists():
-        override = OVERRIDE_FILE.read_text().strip().upper()
+        override = OVERRIDE_FILE.read_text(encoding=ENCODING).strip().upper()
         if override in ("OB", "OL", "OB LB"):
             log.info("Test override active: forcing %s", override)
             status = override
@@ -83,7 +84,7 @@ ups.load: 50
 ups.status: {status}
 battery.charge: {batt_charge}
 """
-    SEQ_FILE.write_text(content)
+    SEQ_FILE.write_text(content, encoding=ENCODING)
     log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
     
 # ---------------------------------------------------------------------------
@@ -91,6 +92,7 @@ battery.charge: {batt_charge}
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """Read serial UPS measurements and publish the UPS state."""
     signal.signal(signal.SIGTERM, lambda _s, _f: sys.exit(0))
     try:
         ser = serial.Serial(f"/dev/{TTY}", BAUD)
