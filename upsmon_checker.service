@@ -1,6 +1,0 @@
-[Unit]
-Description=UPS monitor health check
-
-[Service]
-Type=oneshot
-ExecStart=/opt/upsmon/upsmon_checker.sh

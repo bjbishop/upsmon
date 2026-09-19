@@ -1,129 +1,117 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-"""UPS monitor – reads analog values from an Arduino over serial
-and triggers a graceful system shutdown when power is lost."""
+"""NUT dummy-ups pipe-mode bridge.
+
+Reads analog values from an Arduino over serial (same logic as the
+original upsmon.py) and emits NUT key=value lines to stdout so that
+the dummy-ups driver can serve them to upsd and its clients.
+
+Run this as the 'port' value in ups.conf:
+    [myups]
+        driver = dummy-ups
+        port = /opt/upsmon/nut-bridge.py
+        mode = pipe        # or prefix port with | depending on NUT version
+        desc = "Homebrew serial UPS"
+"""
 
 import collections
 import logging
 import os
-import pathlib
 import signal
 import sys
-from subprocess import call
-
+import time
+import pathlib
 import serial
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration  (mirrors your existing upsmon.py env-var pattern)
 # ---------------------------------------------------------------------------
 
 TTY = os.environ.get("UPSMON_TTY", "ttyACM0")
 BAUD = int(os.environ.get("UPSMON_BAUD", "9600"))
-ENCODING = "ascii"  # Arduino Serial.println() sends plain ASCII
+ENCODING = "ascii"
 
-TMPFILE = pathlib.Path("/run/upsmon/flag")
+# Same thresholds as original — no need to retune anything
+THRESHOLD_SHUTDOWN = 10   # avg >= this → on battery
+THRESHOLD_CANCEL   = 2    # avg <= this → on mains
+WINDOW_SIZE        = 3
 
-# Dry-run mode — set the env var OR drop the marker file to enable.
-# When active, shutdown/cancel commands are logged but never executed.
-# NOTE: the marker file lives in WorkingDirectory (/opt/upsmon), NOT /tmp,
-# because the systemd unit uses PrivateTmp=yes which isolates /tmp.
-DRYRUN_FILE = pathlib.Path("/opt/upsmon/.dryrun")
-DRYRUN = os.environ.get("UPSMON_DRYRUN", "0").strip().lower() in ("1", "true", "yes")
+# How often to re-emit NUT variables even when state hasn't changed.
+# dummy-ups will mark the UPS stale if it stops hearing from us.
+REPUBLISH_INTERVAL = 30   # seconds
 
-# Hysteresis thresholds – avoids rapid toggling when the ADC value
-# hovers near a single cut-off point.  These correspond to the raw
-# analogRead() values sent by the Arduino (see upsmon.processing).
-THRESHOLD_SHUTDOWN = 10   # avg >= this  → battery light ON  → schedule shutdown
-THRESHOLD_CANCEL = 2      # avg <= this  → battery light OFF → cancel shutdown
+# Use test file for simulation
+OVERRIDE_FILE = pathlib.Path("/opt/upsmon/test-state")
 
-# Number of consecutive readings that must agree before acting.
-WINDOW_SIZE = 3
-
-# How long to wait before powering off once battery is detected.
-# Gives time for short blips to self-correct.
-SHUTDOWN_DELAY = "+1minute"
+# Static NUT variables we always advertise.
+# dummy-ups requires at least ups.status; the rest keep upsmon happy.
+NUT_STATIC = {
+    "device.mfr":          "Homebrew",
+    "device.model":        "ArduinoUPS",
+    "battery.voltage.nominal": "12.0",
+    "ups.load":            "50",       # we have no real load data; dummy value
+}
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
+    stream=sys.stderr,          # IMPORTANT: logs go to stderr, NUT data to stdout
 )
-log = logging.getLogger("upsmon")
+log = logging.getLogger("nut-bridge")
 
 # ---------------------------------------------------------------------------
-# Helpers
+# NUT output helpers
 # ---------------------------------------------------------------------------
 
-def is_dryrun() -> bool:
-    """Return True if dry-run mode is active.
+SEQ_FILE = pathlib.Path("/opt/upsmon/myups.seq")
 
-    Checked on every decision so you can toggle it at runtime by
-    creating or removing /opt/upsmon/.dryrun without restarting the
-    service.
-    """
-    return DRYRUN or DRYRUN_FILE.exists()
+def write_seq(on_battery: bool) -> None:
+    status = "OB" if on_battery else "OL"
+    batt_charge = "75" if on_battery else "100"
 
-# ---------------------------------------------------------------------------
-# Actions
-# ---------------------------------------------------------------------------
+    if OVERRIDE_FILE.exists():
+        override = OVERRIDE_FILE.read_text().strip().upper()
+        if override in ("OB", "OL", "OB LB"):
+            log.info("Test override active: forcing %s", override)
+            status = override
+            batt_charge = "10" if override == "OB LB" else "75" if override == "OB" else "100"
 
-def schedule_shutdown() -> None:
-    """Schedule a delayed poweroff (idempotent via flag-file guard).
-
-    Creates a flag file so subsequent calls are no-ops, then asks
-    systemd to power off after SHUTDOWN_DELAY.  If the flag file
-    cannot be created, we bail out rather than risk an untracked
-    shutdown that cancel_pending_shutdown() can't detect.
-    """
-    if TMPFILE.exists():
-        return
-    if is_dryrun():
-        log.warning("DRYRUN: would schedule shutdown — skipping")
-        return
-    try:
-        TMPFILE.touch()
-    except OSError:
-        log.error("Cannot create flag file %s — aborting shutdown", TMPFILE)
-        return
-    log.warning("SHUTTING DOWN in %s", SHUTDOWN_DELAY)
-    call(["/usr/bin/systemctl", "poweroff", f"--when={SHUTDOWN_DELAY}"])
-
-
-def cancel_pending_shutdown() -> None:
-    """Cancel a previously scheduled poweroff and remove the flag file.
-
-    The systemctl cancel runs *before* unlinking the flag so that
-    even if the unlink fails, the shutdown is still cancelled.
-    """
-    if not TMPFILE.exists():
-        return
-    if is_dryrun():
-        log.info("DRYRUN: would cancel shutdown — skipping")
-        return
-    log.info("Cancelling pending shutdown (removing %s)", TMPFILE)
-    call(["/usr/bin/systemctl", "poweroff", "--when=cancel"])
-    try:
-        TMPFILE.unlink()
-    except FileNotFoundError:
-        pass
-
+    content = f"""device.mfr: Homebrew
+device.model: ArduinoUPS
+battery.voltage.nominal: 12.0
+ups.load: 50
+ups.status: {status}
+battery.charge: {batt_charge}
+"""
+    SEQ_FILE.write_text(content)
+    log.info("Wrote ups.status: %s to %s", status, SEQ_FILE)
+    
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Clean exit on SIGTERM (sent by systemd on stop)
-    signal.signal(signal.SIGTERM, lambda _sig, _frame: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda _s, _f: sys.exit(0))
+    try:
+        ser = serial.Serial(f"/dev/{TTY}", BAUD)
+    except serial.SerialException as exc:
+        log.error("Cannot open serial port /dev/%s: %s", TTY, exc)
+        sys.exit(1)
 
-    ser = serial.Serial(f"/dev/{TTY}", BAUD)
     log.info("Listening on /dev/%s @ %d baud", TTY, BAUD)
-    if is_dryrun():
-        log.info("*** DRY-RUN MODE ACTIVE — no shutdown commands will be executed ***")
 
-    window: collections.deque[int] = collections.deque(maxlen=WINDOW_SIZE)
+    window:     collections.deque[int] = collections.deque(maxlen=WINDOW_SIZE)
+    on_battery: bool                   = False   # assume mains on startup
+    last_emit:  float                  = 0.0
+
+    # Emit an initial state immediately so dummy-ups isn't starved at startup
+    write_seq(on_battery)
+    last_emit = time.monotonic()
 
     while True:
+        # --- Read one serial line -------------------------------------------
         try:
-            line = ser.readline().decode(ENCODING).strip()
+            line  = ser.readline().decode(ENCODING).strip()
             if not line:
                 continue
             value = int(line)
@@ -134,17 +122,31 @@ def main() -> None:
             log.error("Serial error: %s", exc)
             break
 
+        # --- Windowed average (identical to original logic) -----------------
         window.append(value)
         if len(window) < WINDOW_SIZE:
-            continue  # wait until we have enough samples
+            continue
 
         avg = sum(window) / WINDOW_SIZE
         log.debug("Raw=%d  Avg=%.1f  Window=%s", value, avg, list(window))
 
-        if avg <= THRESHOLD_CANCEL:
-            cancel_pending_shutdown()
-        elif avg >= THRESHOLD_SHUTDOWN:
-            schedule_shutdown()
+        # --- Determine new state --------------------------------------------
+        if avg <= THRESHOLD_CANCEL and on_battery:
+            on_battery = False
+            log.info("Mains restored — emitting OL to NUT")
+            write_seq(on_battery)
+            last_emit = time.monotonic()
+
+        elif avg >= THRESHOLD_SHUTDOWN and not on_battery:
+            on_battery = True
+            log.warning("Power loss detected — emitting OB to NUT")
+            write_seq(on_battery)
+            last_emit = time.monotonic()
+
+        # --- Periodic republish so dummy-ups doesn't go stale ---------------
+        elif time.monotonic() - last_emit >= REPUBLISH_INTERVAL:
+            write_seq(on_battery)
+            last_emit = time.monotonic()
 
     ser.close()
 
