@@ -108,6 +108,7 @@ esac
 [Unit]
 Description=Homebrew UPS serial monitor bridge
 After=network.target
+Before=nut-driver@myups.service
 
 [Service]
 Type=simple
