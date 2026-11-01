@@ -59,9 +59,9 @@ mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505 \
     --hash=sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558
     # via isort
-platformdirs==4.12.1 \
-    --hash=sha256:38da801a4af303033cbffccb39030db22bf0473e6414309b02acebeee7ca8bf1 \
-    --hash=sha256:7f251621befae78b2cb74616f9fc99d3fa3db0afba5035987731f8dcd430337d
+platformdirs==4.14.0 \
+    --hash=sha256:1dadfc59a8a5d7565b3d9270ae8fa71c065595352c4277b41c11ee6c222c4b91 \
+    --hash=sha256:83f009c1e8c5fc36869b5171755b291887bd2cade7965233cdfabd23d754720b
     # via pylint
 pylint==4.0.9 \
     --hash=sha256:6f1305780229ae720e89b8aff2b3ff857cbb268fbab98c8b586960267667ad34 \
